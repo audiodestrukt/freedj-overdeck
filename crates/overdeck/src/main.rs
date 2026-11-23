@@ -13,6 +13,7 @@
 mod config;
 mod deck;
 mod engine;
+mod panel;
 
 use anyhow::{bail, Context, Result};
 use config::Config;
@@ -69,6 +70,7 @@ fn decks(cfg: &Config) -> Result<Vec<Deck>> {
 struct Host {
     decks: Vec<Deck>,
     mixer: Option<clap_host::Instance>,
+    panel: bool,
 }
 
 fn host(cfg: &Config) -> Result<Host> {
@@ -91,7 +93,7 @@ fn host(cfg: &Config) -> Result<Host> {
         }
         None => None,
     };
-    Ok(Host { decks, mixer })
+    Ok(Host { decks, mixer, panel: cfg.panel })
 }
 
 fn engine(cfg: &Config, h: &Host) -> (Engine, Sender) {
@@ -132,6 +134,8 @@ fn drivers(cfg: &Config) -> Result<Vec<Box<dyn Driver>>> {
 /// The main thread's loop until `done`: hardware → ODP → decks, scripted
 /// parameter moves, and the plugins' main-thread callbacks.
 fn main_loop(h: &mut Host, autos: &mut [Auto], drivers: &mut [Box<dyn Driver>], tx: &mut Sender, done: &AtomicBool) {
+    let mut panel = start_panel(h);
+    let mut moves = Vec::new();
     let t0 = Instant::now();
     let mut inputs = Vec::new();
     let mut evs = Vec::new();
@@ -167,10 +171,30 @@ fn main_loop(h: &mut Host, autos: &mut [Auto], drivers: &mut [Box<dyn Driver>], 
                 None => { log::warn!("overdeck: {} won't take {plain} for {}", c.target, c.param); a.done = true; }
             }
         }
+        if let (Some(p), Some(m)) = (&mut panel, &h.mixer) {
+            moves.clear();
+            p.poll(m, &mut moves);
+            for &(id, value) in &moves { tx.send(decks.len(), clap_host::ParamEvent { frame: 0, id, value }); }
+        }
         for d in decks.iter() { d.inst.idle(); }
         if let Some(m) = &h.mixer { m.idle(); }
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+/// The mixer's panel, if asked for: listen, and start `overdeck-panel`.
+fn start_panel(h: &Host) -> Option<panel::Panel> {
+    if !h.panel || h.mixer.is_none() { return None; }
+    let p = match panel::Panel::listen() {
+        Ok(p) => p,
+        Err(e) => { log::warn!("panel: can't listen: {e}"); return None; }
+    };
+    let exe = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("overdeck-panel")));
+    match exe.map(|e| std::process::Command::new(e).arg(&p.path).spawn()) {
+        Some(Ok(_)) => log::info!("panel: started ({})", p.path.display()),
+        _ => log::warn!("panel: couldn't start overdeck-panel (build it: cargo build --release -p overdeck-panel); connect one to {}", p.path.display()),
+    }
+    Some(p)
 }
 
 fn run(cfg: &Config, secs: Option<f64>) -> Result<()> {

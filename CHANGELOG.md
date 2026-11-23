@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- The mixer's panel (`overdeck-panel`) shows two channel strips (Trim,
+  High, Mid and Low knobs, a fader), a Master knob and a crossfader. It
+  shows the mixer's live values, so scripted automation moves it, and
+  sends your moves back.
+  - With `panel = true`, Overdeck opens the panel itself and talks to it
+    over a local socket, one JSON object per line.
+  - The panel is a separate process because the decks already hold the
+    process's one winit event loop.
+  - When docked, it sits at the bottom centre.
+  - The CLAP host reads parameter values and their text back from plugins.
 - `dock = true` puts the decks' windows side by side across the screen
   (freedj's `OPENDECK_TILE`). On a Wayland desktop the decks go through
   XWayland, since Wayland doesn't let a client place its windows. This is

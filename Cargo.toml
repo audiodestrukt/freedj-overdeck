@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members  = ["crates/odp", "crates/clap-host", "crates/surface", "crates/overdeck", "crates/mixer"]
+members  = ["crates/odp", "crates/clap-host", "crates/surface", "crates/overdeck", "crates/mixer", "crates/panel"]
 
 [workspace.package]
 version = "0.1.0"

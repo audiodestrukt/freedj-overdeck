@@ -5,6 +5,7 @@
 sample_rate = 48000
 block = 512                    # 256 underran once in 42 s on the desktop; 512 played clean
 dock = true                    # deck windows side by side
+panel = true                   # the mixer's panel (overdeck-panel)
 
 [[deck]]
 plugin = "~/.clap/OpenDeck.clap"

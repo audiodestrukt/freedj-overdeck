@@ -1,0 +1,11 @@
+[package]
+name        = "overdeck-panel"
+description = "Overdeck's mixer panel: the mixer's knobs and faders, live, over the host's panel socket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eframe     = "0.29"
+serde      = { workspace = true }
+serde_json = { workspace = true }

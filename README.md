@@ -52,7 +52,10 @@ cargo build --release -p overdeck-mixer
 ```
 
 The demo starts on A, brings B in to the middle, swaps the bass, crosses
-over to B, and pulls A's fader down.
+over to B, and pulls A's fader down. With `dock = true` the decks sit side
+by side. With `panel = true` the mixer's panel opens below them
+(`cargo build --release -p overdeck-panel` first). It moves with the
+automation, and you can take any control yourself.
 
 In freedj-3000, `make plugin` builds and installs `~/.clap/OpenDeck.clap`.
 
@@ -65,6 +68,7 @@ In freedj-3000, `make plugin` builds and installs `~/.clap/OpenDeck.clap`.
 | `clap-host` | a small CLAP host on `clap-sys`: bundles, instances, params, state, processing |
 | `overdeck` | the host binary: config, decks, mixer stage, automation, the audio engine, `run` / `render` / `list` |
 | `mixer` | the reference DJ mixer plugin (test instrument) |
+| `panel` | `overdeck-panel`: the mixer's knobs and faders, live, over the host's panel socket |
 
 ## Tests
 

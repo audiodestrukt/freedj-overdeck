@@ -39,6 +39,9 @@ pub struct Config {
     /// draw into Overdeck's own window (docs/ARCHITECTURE.md §3).
     #[serde(default)]
     pub dock: bool,
+    /// Open the mixer's panel (`overdeck-panel`, beside this binary).
+    #[serde(default)]
+    pub panel: bool,
     #[serde(rename = "deck", default)]
     pub decks: Vec<DeckCfg>,
     #[serde(rename = "step", default)]

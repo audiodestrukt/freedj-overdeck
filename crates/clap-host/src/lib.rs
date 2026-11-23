@@ -236,6 +236,20 @@ impl Instance {
         unsafe { p.text_to_value?(self.h.plugin, id, t.as_ptr(), &mut v) }.then_some(v)
     }
 
+    /// A parameter's current CLAP value.  Main thread.
+    pub fn get_value(&self, id: u32) -> Option<f64> {
+        let p = self.h.ext::<clap_plugin_params>(CLAP_EXT_PARAMS)?;
+        let mut v = 0.0;
+        unsafe { p.get_value?(self.h.plugin, id, &mut v) }.then_some(v)
+    }
+
+    /// The plugin's text for a parameter value ("-6.0 dB", "kill").  Main thread.
+    pub fn value_to_text(&self, id: u32, value: f64) -> Option<String> {
+        let p = self.h.ext::<clap_plugin_params>(CLAP_EXT_PARAMS)?;
+        let mut buf = [0 as c_char; 64];
+        unsafe { p.value_to_text?(self.h.plugin, id, value, buf.as_mut_ptr(), buf.len() as u32) }.then(|| cstr(buf.as_ptr()))
+    }
+
     pub fn save_state(&self) -> Result<Vec<u8>> {
         let s = self.h.ext::<clap_plugin_state>(CLAP_EXT_STATE).ok_or_else(|| anyhow!("no clap.state"))?;
         let mut out: Vec<u8> = Vec::new();
