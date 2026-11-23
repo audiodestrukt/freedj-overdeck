@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members  = ["crates/odp", "crates/clap-host", "crates/surface", "crates/overdeck"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+
+[workspace.dependencies]
+odp        = { path = "crates/odp" }
+clap-host  = { path = "crates/clap-host" }
+surface    = { path = "crates/surface" }
+clap-sys   = "0.6"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+log        = "0.4"
+anyhow     = "1"
+
+[profile.release]
+debug = 1

@@ -1,0 +1,10 @@
+[package]
+name        = "surface"
+description = "Overdeck's hardware abstraction: drivers read buses (SPI, I2C, GPIO, MIDI, USB) and speak ODP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+odp = { workspace = true }
+log = { workspace = true }

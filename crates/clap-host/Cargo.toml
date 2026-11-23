@@ -1,0 +1,12 @@
+[package]
+name        = "clap-host"
+description = "A small CLAP host: load a bundle, make instances, set parameters and state, process blocks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clap-sys   = { workspace = true }
+libloading = "0.8"
+anyhow     = { workspace = true }
+log        = { workspace = true }

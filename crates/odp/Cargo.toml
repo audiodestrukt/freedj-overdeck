@@ -1,0 +1,8 @@
+[package]
+name        = "odp"
+description = "The Overdeck protocol: what a deck surface says to a deck, and what a deck shows back, whatever carries it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

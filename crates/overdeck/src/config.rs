@@ -1,0 +1,111 @@
+//! `overdeck.toml`: which decks, where their audio goes, which hardware.
+//!
+//! ```toml
+//! sample_rate = 48000
+//! block = 256
+//!
+//! [[deck]]
+//! plugin = "~/.clap/OpenDeck.clap"
+//! track  = "~/Music/a.mp3"
+//! out    = [0, 1]            # device channels (left, right)
+//!
+//! [[deck]]
+//! plugin = "~/.clap/OpenDeck.clap"
+//! track  = "~/Music/b.mp3"
+//! out    = [2, 3]
+//!
+//! [[step]]                   # a scripted input (tests, demos)
+//! at = 4.0                   # seconds after start
+//! deck = 0
+//! play = true                # or cue / touch (bool), jog (ticks), pitch (%)
+//! ```
+
+use anyhow::{bail, Context, Result};
+use odp::{Control, Input};
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+#[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    #[serde(default = "default_rate")]
+    pub sample_rate: u32,
+    #[serde(default = "default_block")]
+    pub block: u32,
+    #[serde(rename = "deck", default)]
+    pub decks: Vec<DeckCfg>,
+    #[serde(rename = "step", default)]
+    pub steps: Vec<Step>,
+}
+
+fn default_rate() -> u32 { 48_000 }
+fn default_block() -> u32 { 256 }
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct DeckCfg {
+    pub plugin: String,
+    /// The plugin's CLAP id, if the bundle has more than one.
+    pub id: Option<String>,
+    pub track: Option<String>,
+    /// Device channels for left and right.
+    #[serde(default = "default_out")]
+    pub out: [usize; 2],
+    #[serde(default = "one")]
+    pub gain: f32,
+}
+
+fn default_out() -> [usize; 2] { [0, 1] }
+fn one() -> f32 { 1.0 }
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    pub at: f64,
+    pub deck: u8,
+    pub play: Option<bool>,
+    pub cue: Option<bool>,
+    pub touch: Option<bool>,
+    pub jog: Option<i32>,
+    pub pitch: Option<f32>,
+}
+
+impl Step {
+    pub fn input(&self) -> Result<(Duration, Input)> {
+        let c = match (self.play, self.cue, self.touch, self.jog, self.pitch) {
+            (Some(b), None, None, None, None) => Control::Play(b),
+            (None, Some(b), None, None, None) => Control::Cue(b),
+            (None, None, Some(b), None, None) => Control::JogTouch(b),
+            (None, None, None, Some(t), None) => Control::Jog(t),
+            (None, None, None, None, Some(p)) => Control::Pitch(p),
+            _ => bail!("a step at {} s needs exactly one of play / cue / touch / jog / pitch", self.at),
+        };
+        Ok((Duration::from_secs_f64(self.at), Input { deck: self.deck, control: c }))
+    }
+}
+
+pub fn expand(p: &str) -> PathBuf {
+    match p.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(rest),
+        None => PathBuf::from(p),
+    }
+}
+
+impl Config {
+    pub fn load(path: &Path) -> Result<Config> {
+        let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        let c: Config = toml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+        if c.decks.is_empty() { bail!("{}: no [[deck]]", path.display()); }
+        for s in &c.steps {
+            s.input()?;
+            if s.deck as usize >= c.decks.len() { bail!("a step names deck {}, but there are {}", s.deck, c.decks.len()); }
+        }
+        Ok(c)
+    }
+
+    /// Device channels the decks need.
+    pub fn channels(&self) -> usize {
+        self.decks.iter().flat_map(|d| d.out).max().map_or(2, |m| (m + 1).max(2))
+    }
+}
