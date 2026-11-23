@@ -257,6 +257,9 @@ mirror decks both read. A mirror only listens, so it doesn't wait for this.
   - every deck had its own wgpu instance;
   - plugin `destroy` returned before the deck was gone.
 
+- `follow = N` makes a slot a mirror of Link player N (§7). The mirror
+  takes PLAYER No. AUTO, so it never holds the number it mirrors.
+
 **Known limits:**
 
 - **Network services.** Two decks in one process share one set of network
@@ -279,7 +282,8 @@ mirror decks both read. A mirror only listens, so it doesn't wait for this.
 5. **Units:** the trait, a WSOLA deck unit, the CLAP wrapper.
 6. **USB gadget:** UAC2 + ODP vendor interface on a Pi/RP2350; the link
    plugin.
-7. **Real decks (§7):** freedj's follow mode (a deck that mirrors Link
-   player N, tested against recorded XDJ traffic); then audio inputs in the
-   engine and the plugin's pass-through; then ASRC for an input on another
-   clock; then host-owned Link.
+7. **Real decks (§7):** freedj's follow mode is done (`follow = N`; tested
+   end to end on loopback and against a recorded XDJ-1000MK2, not yet a
+   live player); next, audio inputs in the engine and the plugin's
+   pass-through; then ASRC for an input on another clock; then host-owned
+   Link.

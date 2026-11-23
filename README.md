@@ -80,6 +80,25 @@ again. See docs/ALL-IN-ONE.md.
 
 In freedj-3000, `make plugin` builds and installs `~/.clap/OpenDeck.clap`.
 
+## Real decks beside plugin decks
+
+A slot can mirror a real player on Pro DJ Link instead of playing:
+
+```toml
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+follow = 2                     # the Link player to mirror (1-6)
+```
+
+The deck (freedj's FOLLOW mode) loads whatever that player loads, over
+LINK, and shows its playhead, PLAY, pitch, MASTER and SYNC on its screen,
+in its own window or in the DECKS view. It never plays and only listens on
+Link. An XDJ-1000 only reports its beat number, so its mirror is exact at
+each beat and runs on at the pitch in between; a CDJ-3000 reports its
+playhead in ms. Link carries no audio: for now the real player's sound goes
+by cable to your mixer. Taking it in on an audio input, into Overdeck's
+mixer, comes next (docs/ARCHITECTURE.md §7).
+
 ## Crates
 
 | Crate | What it is |

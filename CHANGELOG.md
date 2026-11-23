@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- Mirror slots: `follow = N` on a `[[deck]]` makes that freedj deck a
+  mirror of Link player N (freedj's FOLLOW, written into the deck's saved
+  state). It loads what the real player loads and shows its playhead,
+  PLAY, pitch, MASTER and SYNC; it never plays. The design for real decks
+  beside plugin decks (audio inputs, ASRC, host-owned Link) is in
+  docs/ARCHITECTURE.md §7.
 - All decks in one window. The display contract (`crates/display`): the
   host makes a shared-memory screen per deck and names it in
   `OVERDECK_DISPLAY`. A freedj deck draws its own screen into it

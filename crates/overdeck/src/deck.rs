@@ -41,7 +41,10 @@ impl Deck {
     pub fn new(bundles: &mut Bundles, cfg: DeckCfg, sample_rate: u32, block: u32) -> Result<Deck> {
         let bundle = bundles.get(&cfg.plugin)?;
         let mut inst = bundle.instantiate(cfg.id.as_deref())?;
-        if let Some(t) = &cfg.track {
+        if let Some(n) = cfg.follow {
+            if !(1..=6).contains(&n) { return Err(anyhow!("follow = {n}: a Link player number is 1-6")); }
+            set_field(&inst, "follow", n.to_string()).context("make the deck a mirror")?;
+        } else if let Some(t) = &cfg.track {
             set_track(&inst, &expand(t)).with_context(|| format!("give the deck its track {t}"))?;
         }
         inst.activate(f64::from(sample_rate), 1, block.max(4096))?;
@@ -56,18 +59,28 @@ impl Deck {
 /// Write the track there and load the state back: the plugin loads it.
 pub fn set_track(inst: &Instance, path: &Path) -> Result<()> {
     if !path.is_file() { return Err(anyhow!("{} is not a file", path.display())); }
-    let bytes = inst.save_state()?;
-    let (json, framed) = unframe(&bytes);
+    set_field(inst, "track", serde_json::to_string(&path.to_string_lossy())?)
+}
+
+/// Write one field of freedj's saved state (`value` is the field's JSON:
+/// `"\"/music/a.mp3\""` for the track, `"2"` for FOLLOW's player) and load
+/// the state back.
+pub fn set_field(inst: &Instance, name: &str, value: String) -> Result<()> {
+    inst.load_state(&with_field(&inst.save_state()?, name, value)?)
+}
+
+fn with_field(bytes: &[u8], name: &str, value: String) -> Result<Vec<u8>> {
+    let (json, framed) = unframe(bytes);
     let mut st: serde_json::Value = serde_json::from_slice(json)
         .with_context(|| format!("the plugin's state isn't JSON (not a freedj deck?): {} bytes starting {:02x?}", bytes.len(), &bytes[..bytes.len().min(16)]))?;
     let fields = st.as_object_mut().ok_or_else(|| anyhow!("state is not an object"))?
         .entry("fields").or_insert_with(|| serde_json::json!({}));
-    fields["track"] = serde_json::Value::String(serde_json::to_string(&path.to_string_lossy())?);
+    fields[name] = serde_json::Value::String(value);
     let json = serde_json::to_vec(&st)?;
     let mut out = Vec::with_capacity(json.len() + 8);
     if framed { out.extend_from_slice(&(json.len() as u64).to_le_bytes()); }
     out.extend_from_slice(&json);
-    inst.load_state(&out)
+    Ok(out)
 }
 
 /// The JSON in a nih-plug state, and whether it came length-framed.
@@ -164,7 +177,22 @@ impl Linear {
 
 #[cfg(test)]
 mod tests {
-    use super::{unframe, Linear};
+    use super::{unframe, with_field, Linear};
+
+    /// `follow = 2` reaches freedj as `"fields":{"follow":"2"}` (its saved
+    /// FOLLOW field), beside whatever else the state holds, framed as it came.
+    #[test]
+    fn a_mirror_deck_gets_its_player_in_the_saved_state() {
+        let json = br#"{"version":"0.1.0","params":{},"fields":{"track":"\"\""}}"#;
+        let mut b = (json.len() as u64).to_le_bytes().to_vec();
+        b.extend_from_slice(json);
+        let out = with_field(&b, "follow", "2".into()).unwrap();
+        let (j, framed) = unframe(&out);
+        assert!(framed);
+        let v: serde_json::Value = serde_json::from_slice(j).unwrap();
+        assert_eq!(v["fields"]["follow"], "2");
+        assert_eq!(v["fields"]["track"], "\"\"", "the other fields stay");
+    }
 
     #[test]
     fn nih_plug_state_is_length_framed_json() {

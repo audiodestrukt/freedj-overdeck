@@ -100,6 +100,10 @@ pub struct DeckCfg {
     /// The plugin's CLAP id, if the bundle has more than one.
     pub id: Option<String>,
     pub track: Option<String>,
+    /// Mirror Link player N instead of playing (freedj's FOLLOW): the deck
+    /// loads whatever that player loads and shows its playhead; `track` is
+    /// ignored.  The real player's audio comes in on a cable.
+    pub follow: Option<u8>,
     /// Device channels for left and right.  Default: [0, 1] with no mixer;
     /// with a mixer, none (the deck only feeds the mixer).
     pub out: Option<[usize; 2]>,
