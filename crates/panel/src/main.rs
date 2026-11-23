@@ -28,7 +28,22 @@ pub struct Deck {
     pub pitch: String,
     pub elapsed: f64,
     pub wave: VecDeque<[f32; 3]>,
+    /// How many columns have ever arrived: the newest column's index + 1.
+    pub total: u64,
+    /// When column 0 played, on this process's clock (seconds), tracked
+    /// slowly from the batches' arrival, so the waveform scrolls by time
+    /// rather than jumping a batch at a time.
+    pub base: Option<f64>,
 }
+
+/// Seconds on this process's clock.
+pub fn now_s() -> f64 {
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(std::time::Instant::now).elapsed().as_secs_f64()
+}
+
+/// One waveform column's length, seconds (the host meters every 10 ms).
+pub const COL_S: f64 = 0.010;
 
 #[derive(Deserialize)]
 struct DeckMsg { title: String, playing: bool, pitch: String, elapsed: f64, cols: Vec<[f32; 3]> }
@@ -101,8 +116,17 @@ fn main() -> eframe::Result<()> {
                             d.playing = m.playing;
                             d.pitch = m.pitch;
                             d.elapsed = m.elapsed;
+                            d.total += m.cols.len() as u64;
                             d.wave.extend(m.cols);
                             while d.wave.len() > WAVE_COLS { d.wave.pop_front(); }
+                            if d.total > 0 {
+                                // The newest column played about now: column 0 at now − total × 10 ms.
+                                let seen = now_s() - d.total as f64 * COL_S;
+                                d.base = Some(match d.base {
+                                    Some(b) if (seen - b).abs() < 0.5 => b + 0.05 * (seen - b),   // follow slowly: smooth
+                                    _ => seen,                                                     // first, or far off (a stall): jump
+                                });
+                            }
                         }
                     }
                     _ => {}

@@ -8,7 +8,7 @@
 //! - BROWSE: the tracks beside the decks' (until the host runs a library),
 //!   LOAD onto any deck.
 
-use crate::{State, WAVE_COLS};
+use crate::{now_s, State, COL_S};
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Rounding, Sense, Stroke, Vec2};
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -98,16 +98,27 @@ impl Screen {
             p.rect_filled(Rect::from_min_max(Pos2::new(head, wave.top()), wave.max), Rounding::ZERO, Color32::from_rgb(12, 15, 19));
             let st = self.state.lock().unwrap();
             if let Some(d) = st.decks.get(i) {
+                // Each column drawn where its time puts it, LAG behind now so
+                // the newest data has always arrived: it slides every frame.
+                const LAG: f64 = 0.060;
+                const PX: f32 = 2.0;   // a column's width
                 let mid_y = wave.center().y;
                 let half = wave.height() / 2.0 - 3.0;
-                let cols = ((head - wave.left()) / 2.0) as usize;
-                for (k, c) in d.wave.iter().rev().take(cols.min(WAVE_COLS)).enumerate() {
-                    let x = head - 2.0 * k as f32 - 1.0;
-                    for (v, gain, col) in [(c[0], 3.2, LOW), (c[1], 5.0, MID), (c[2], 12.0, HIGH)] {
-                        let h = (v * gain).min(1.0) * half;
-                        if h > 0.3 { p.line_segment([Pos2::new(x, mid_y - h), Pos2::new(x, mid_y + h)], Stroke::new(2.0, col)); }
+                let mut mesh = egui::Mesh::default();
+                if let Some(base) = d.base {
+                    let show = now_s() - LAG;
+                    let first = d.total - d.wave.len() as u64;
+                    for (k, c) in d.wave.iter().enumerate() {
+                        let t = base + (first + k as u64) as f64 * COL_S;
+                        let x = head - ((show - t) / COL_S) as f32 * PX;
+                        if x > head || x < wave.left() { continue; }
+                        for (v, gain, col) in [(c[0], 3.2, LOW), (c[1], 5.0, MID), (c[2], 12.0, HIGH)] {
+                            let h = (v * gain).min(1.0) * half;
+                            if h > 0.3 { mesh.add_colored_rect(Rect::from_min_max(Pos2::new(x - PX, mid_y - h), Pos2::new(x.min(head), mid_y + h)), col); }
+                        }
                     }
                 }
+                p.add(egui::Shape::mesh(mesh));
                 if !d.playing && d.wave.is_empty() {
                     p.text(Pos2::new(wave.left() + 12.0, mid_y), egui::Align2::LEFT_CENTER, "not playing", FontId::proportional(12.0), DIM);
                 }
@@ -240,6 +251,6 @@ impl eframe::App for Screen {
             }
             Tab::Browse => self.browse(ctx),
         }
-        ctx.request_repaint_after(std::time::Duration::from_millis(16));   // the waveforms scroll
+        ctx.request_repaint();   // the waveforms scroll: every frame (vsync paces it)
     }
 }

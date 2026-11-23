@@ -83,6 +83,7 @@ fn host(cfg: &Config) -> Result<Host> {
         std::env::set_var("OPENDECK_TILE", cfg.decks.len().to_string());
         if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("DISPLAY").is_some() {
             log::info!("overdeck: dock: the decks use XWayland, so their windows can be placed");
+            if let Some(w) = std::env::var_os("WAYLAND_DISPLAY") { std::env::set_var("OVERDECK_WAYLAND_DISPLAY", w); }
             std::env::remove_var("WAYLAND_DISPLAY");
         }
     }
@@ -242,7 +243,14 @@ fn start_panel(h: &Host) -> Option<panel::Panel> {
     let exe = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("overdeck-panel")));
     let mut args = vec![p.path.to_string_lossy().into_owned()];
     if aio { args.extend(["--screen".into(), "aio".into(), "--decks".into(), h.decks.len().to_string()]); }
-    match exe.map(|e| std::process::Command::new(e).args(&args).spawn()) {
+    let spawn = |e: std::path::PathBuf| {
+        let mut c = std::process::Command::new(e);
+        c.args(&args);
+        // The unit's screen places nothing, so it keeps native Wayland (smoother frame pacing than XWayland).
+        if aio { if let Some(w) = std::env::var_os("OVERDECK_WAYLAND_DISPLAY") { c.env("WAYLAND_DISPLAY", w); } }
+        c.spawn()
+    };
+    match exe.map(spawn) {
         Some(Ok(_)) => log::info!("panel: started ({})", p.path.display()),
         _ => log::warn!("panel: couldn't start overdeck-panel (build it: cargo build --release -p overdeck-panel); connect one to {}", p.path.display()),
     }
