@@ -46,6 +46,11 @@ pub struct Config {
     /// 1024×600 screen (four decks, browse).  `overdeck run … --aio` sets it.
     #[serde(default)]
     pub screen: Option<String>,
+    /// The decks draw their screens into the unit's screen (the display
+    /// contract, `overdeck-display`) instead of opening windows.  `--aio`
+    /// turns it on; `--windows` keeps the decks' own windows.
+    #[serde(default)]
+    pub display: bool,
     #[serde(rename = "deck", default)]
     pub decks: Vec<DeckCfg>,
     #[serde(rename = "step", default)]

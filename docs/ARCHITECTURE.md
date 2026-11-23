@@ -75,28 +75,41 @@ the first freedj-side change to make.
 
 ## 3. Screens
 
-Today each freedj deck opens its own window (its winit loop, inside the
+A freedj deck on its own opens a window (its winit loop, inside the
 plugin). That's fine on a desktop. On a Pi kiosk (cage shows one window)
 it isn't: four decks means four windows fighting for one screen, and no way
 to put a deck's screen on the GC9A01 in its jog.
 
-The plan is an ODP display extension. The host hands each deck a
-framebuffer per screen (size, format) and the deck renders into it
-offscreen, instead of to a window. The host's display sinks then put frames
-where they belong:
+**The display contract (`crates/display`, built).** The host makes one
+screen per deck before the decks start: a file in shared memory under
+`$XDG_RUNTIME_DIR` with a header, a ring of touches and one RGBA frame,
+sized by the host. It names them in `OVERDECK_DISPLAY`, a path template
+where `{n}` is the deck's number. A deck that finds its screen opens no
+window: it draws each frame off-screen with its own renderer, reads it back
+and copies it in (a seqlock, so a reader never shows a torn frame). The
+unit's screen (`overdeck-panel --screens`) shows each deck's newest frame
+in its tile and writes the touches on a tile into that deck's ring, in the
+frame's 0..1 coordinates; the deck plays them back as its own pointer. The
+deck stays the only thing that draws its screen, so it is pixel-for-pixel
+the deck's, and the host only decides where it goes.
+
+It is a file and an environment variable, not a CLAP extension, because
+nih-plug (freedj's plugin framework) can't offer custom CLAP extensions;
+the contract is the same either way. Measured on the desktop: two decks at
+496×291 draw at 60 fps each (about 35 MB/s of frames). The Pi 5 cost is
+still to measure.
+
+What's next is more sinks, which put frames where they belong:
 
 - **HDMI:** one compositor layout, e.g. four deck screens tiled on one 1080p
   panel;
 - **SPI LCDs:** each jog's round screen. This is the host's job for the
   same bus reasons as in §1.
 
-freedj already renders offscreen for screenshots (`OPENDECK_SCREENSHOT`), so
-the renderer half exists. It needs a "render to this buffer" entry point.
-
-**Until then, `dock = true`.** freedj's `OPENDECK_TILE=N` makes each deck
+**Without it, `dock = true`.** freedj's `OPENDECK_TILE=N` makes each deck
 open its window in its Nth of the screen width, side by side. Overdeck sets
 it, and on Wayland moves the decks to XWayland so they can place their
-windows. These are still separate windows, but it's enough to watch a mix.
+windows. These are separate windows (`overdeck run --aio --windows`).
 
 ## 4. Small boards: units, a lighter plugin
 
@@ -198,7 +211,8 @@ controls from hardware: faders and EQ knobs are surface drivers too.
 - **Network services.** Two decks in one process share one set of network
   services: the second deck's media server can't bind the dbserver port.
   Each deck still claims its own Link player number.
-- **Windows.** Decks open their own windows (§3).
+- **Screens.** With `display = true` (`--aio`) the decks draw into the
+  unit's screen (§3); otherwise they open their own windows.
 - **Not on a Pi yet.** Nothing has been run on a Pi 5. Overdeck is pure
   Rust plus cpal (ALSA), but freedj's CLAP has to be built for aarch64.
 
@@ -209,8 +223,8 @@ controls from hardware: faders and EQ knobs are surface drivers too.
 2. **The ODP CLAP extension in freedj:** every key, jog ticks, lamps back.
 3. **Surface drivers:** GPIO quadrature for the mini jog's two opto
    sensors, PCF8574 keys, MIDI; then the SPI panels moved over from freedj.
-4. **Display extension + sinks:** decks offscreen; HDMI tiling; GC9A01 per
-   jog.
+4. **Display sinks:** decks offscreen is done (§3); next, a kiosk layout
+   on HDMI and a GC9A01 per jog.
 5. **Units:** the trait, a WSOLA deck unit, the CLAP wrapper.
 6. **USB gadget:** UAC2 + ODP vendor interface on a Pi/RP2350; the link
    plugin.

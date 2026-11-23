@@ -151,6 +151,11 @@ impl Screen {
         true
     }
 
+    /// The screen: whether touches sent are still waiting for the deck.
+    pub fn push_touch_pending(&self) -> bool {
+        self.atomic(20).load(Ordering::Acquire) != self.atomic(24).load(Ordering::Acquire)
+    }
+
     /// The deck: the next touch, if any.
     pub fn pop_touch(&mut self) -> Option<Touch> {
         let tail = self.atomic(24).load(Ordering::Relaxed);

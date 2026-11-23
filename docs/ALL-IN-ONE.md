@@ -72,11 +72,10 @@ HDMI panel. Everything is in our hands, so it's the reference product.
 
 ## What a four-channel all-in-one needs that Overdeck lacks
 
-1. **All decks on one screen.** Today each deck opens its own window. An
-   all-in-one has one touchscreen. This needs the display extension from
-   ARCHITECTURE.md §3: decks draw offscreen, Overdeck lays them out, and
-   touches go back to the deck under the finger. It's the most important
-   piece. For a weak GPU there's freedj's GL path (`WGPU_BACKEND=gl`,
+1. **All decks on one screen.** Built: the display contract
+   (ARCHITECTURE.md §3). Decks draw off-screen, the unit's screen lays them
+   out with the mixer, and touches go back to the deck under the finger.
+   Left: measuring it on a Pi 5. For a weak GPU there's freedj's GL path (`WGPU_BACKEND=gl`,
    already used for the CDJ-3000 work) and its SDL backend.
 2. **A product mixer.** The reference mixer is a test instrument. A unit
    needs 4 channels, cue (PFL) to the headphones on a second output pair,
@@ -122,8 +121,7 @@ HDMI panel. Everything is in our hands, so it's the reference product.
 1. **Pi 5 bring-up.** Two decks, the mixer and the panel on a Pi 5. This
    is the same arm64 class as Music Tribe's platform, and our reference
    box.
-2. **One screen.** The display extension: freedj renders into a buffer,
-   and Overdeck lays out N decks and routes touches.
+2. **One screen.** Built (the display contract); measure it on the Pi 5.
 3. **The library in the host.** One scan and one media server; decks
    browse it.
 4. **A dry run on Music Tribe's platform with the Kick emulator.** Put

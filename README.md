@@ -65,12 +65,18 @@ cargo build --release
 ```
 
 This is a 1024×600 screen, as Overdeck would look on a 4-channel
-all-in-one:
+all-in-one. It is one window: the decks open none of their own.
+- DECKS: each deck's own screen, live, drawn by the deck itself into a
+  buffer Overdeck made for it (the display contract, `crates/display`).
+  Touch a deck's screen and the touch goes to that deck. With two decks
+  the mixer sits under them: Trim, High, Mid and Low knobs and a fader per
+  channel, the crossfader and Master. With four, the screens fill a grid;
 - PERFORM: each deck's live three-band waveform (from its actual output)
   and a card with CUE and PLAY that drive the deck;
 - BROWSE: tracks to LOAD onto any deck.
 
-Closing it stops Overdeck. See docs/ALL-IN-ONE.md.
+Closing it stops Overdeck. `--windows` gives the decks their own windows
+again. See docs/ALL-IN-ONE.md.
 
 In freedj-3000, `make plugin` builds and installs `~/.clap/OpenDeck.clap`.
 
@@ -78,6 +84,7 @@ In freedj-3000, `make plugin` builds and installs `~/.clap/OpenDeck.clap`.
 
 | Crate | What it is |
 |---|---|
+| `display` | the display contract: a deck draws its screen into a shared-memory frame the host made, and takes the touches back |
 | `odp` | the Overdeck protocol: controls in, lamps/levels/frames out, a `no_std` wire codec |
 | `surface` | the hardware abstraction: the `Driver` trait; `Script` and `Wire` drivers |
 | `clap-host` | a small CLAP host on `clap-sys`: bundles, instances, params, state, processing |

@@ -33,7 +33,7 @@ const DECK: [Color32; 4] = [
 const LETTER: [&str; 4] = ["A", "B", "C", "D"];
 
 #[derive(PartialEq, Clone, Copy)]
-enum Tab { Perform, Browse }
+enum Tab { Decks, Perform, Browse }
 
 pub struct Screen {
     state: Arc<Mutex<State>>,
@@ -41,11 +41,16 @@ pub struct Screen {
     n: usize,
     tab: Tab,
     sel: usize,
+    /// The decks' own screens, when they draw into this one.
+    decks: Option<crate::decks::Decks>,
 }
 
 impl Screen {
-    pub fn new(state: Arc<Mutex<State>>, out: UnixStream, n: usize) -> Screen {
-        Screen { state, out, n: n.clamp(1, 4), tab: Tab::Perform, sel: 0 }
+    pub fn new(state: Arc<Mutex<State>>, out: UnixStream, n: usize, screens: Option<String>) -> Screen {
+        let n = n.clamp(1, 4);
+        let decks = screens.map(|t| crate::decks::Decks::new(&t, n));
+        let tab = if decks.is_some() { Tab::Decks } else { Tab::Perform };
+        Screen { state, out, n, tab, sel: 0, decks }
     }
 
     fn send(&mut self, v: serde_json::Value) { let _ = writeln!(self.out, "{v}"); }
@@ -57,7 +62,8 @@ impl Screen {
                 ui.horizontal_centered(|ui| {
                     ui.label(RichText::new("OVERDECK").size(20.0).strong().color(Color32::WHITE));
                     ui.add_space(12.0);
-                    for (t, name) in [(Tab::Perform, "PERFORM"), (Tab::Browse, "BROWSE")] {
+                    let tabs: &[(Tab, &str)] = if self.decks.is_some() { &[(Tab::Decks, "DECKS"), (Tab::Perform, "PERFORM"), (Tab::Browse, "BROWSE")] } else { &[(Tab::Perform, "PERFORM"), (Tab::Browse, "BROWSE")] };
+                    for &(t, name) in tabs {
                         let on = self.tab == t;
                         let b = egui::Button::new(RichText::new(name).size(14.0).strong().color(if on { BG } else { DIM }))
                             .fill(if on { Color32::from_gray(232) } else { BAR })
@@ -200,7 +206,7 @@ impl Screen {
                                 if let Some(t) = tracks.get(self.sel) {
                                     let path = t.path.clone();
                                     self.send(serde_json::json!({ "load": { "deck": i, "path": path } }));
-                                    self.tab = Tab::Perform;
+                                    self.tab = if self.decks.is_some() { Tab::Decks } else { Tab::Perform };
                                 }
                             }
                         }
@@ -250,7 +256,14 @@ impl eframe::App for Screen {
                     });
             }
             Tab::Browse => self.browse(ctx),
+            Tab::Decks => {
+                egui::CentralPanel::default().frame(egui::Frame::none().fill(BG).inner_margin(egui::Margin { left: 12.0, right: 12.0, top: 8.0, bottom: 8.0 }))
+                    .show(ctx, |ui| {
+                        if let Some(d) = &mut self.decks { d.show(ui, &self.state, &mut self.out); }
+                    });
+            }
         }
+        crate::shot(ctx);
         ctx.request_repaint();   // the waveforms scroll: every frame (vsync paces it)
     }
 }

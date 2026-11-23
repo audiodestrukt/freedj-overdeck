@@ -35,7 +35,8 @@ fn main() -> Result<()> {
         Some("run") => {
             let secs = flag("--seconds").map(|s| s.parse::<f64>()).transpose()?;
             let mut cfg = Config::load(Path::new(args.get(2).context("run <overdeck.toml>")?))?;
-            if args.iter().any(|a| a == "--aio") { cfg.panel = true; cfg.screen = Some("aio".into()); }
+            if args.iter().any(|a| a == "--aio") { cfg.panel = true; cfg.screen = Some("aio".into()); cfg.display = true; }
+            if args.iter().any(|a| a == "--windows") { cfg.display = false; }
             run(&cfg, secs)
         }
         Some("render") => {
@@ -75,10 +76,56 @@ struct Host {
     mixer: Option<clap_host::Instance>,
     panel: bool,
     screen: Option<String>,
+    /// The decks' screens (the display contract), when they draw into the unit's.
+    screens: Option<Screens>,
+}
+
+/// One shared-memory screen per deck, made before the decks start; the
+/// decks find theirs through `OVERDECK_DISPLAY`, the unit's screen through
+/// `--screens`.  Removed when the run ends.
+struct Screens {
+    template: String,
+    made: Vec<display::Screen>,
+}
+
+impl Drop for Screens {
+    fn drop(&mut self) { for s in &self.made { let _ = std::fs::remove_file(&s.path); } }
+}
+
+/// The size each deck's screen is drawn at: its tile of the unit's 1024×600
+/// screen, at the deck's own shape (1024:600).  Two decks side by side with
+/// the mixer under them; four in a grid.
+pub fn deck_screen_size(decks: usize) -> (u32, u32) {
+    if decks <= 2 { (496, 291) } else { (457, 268) }
+}
+
+fn make_screens(n: usize) -> Result<Screens> {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    // A run that was killed leaves its screens behind: clear any whose Overdeck is gone.
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let pid = name.strip_prefix("overdeck-").and_then(|r| r.split_once("-deck")).map(|(p, _)| p.to_owned());
+            if let (true, Some(pid)) = (name.ends_with(".screen"), pid) {
+                if !Path::new("/proc").join(&pid).exists() { let _ = std::fs::remove_file(e.path()); }
+            }
+        }
+    }
+    let template = dir.join(format!("overdeck-{}-deck{{n}}.screen", std::process::id())).to_string_lossy().into_owned();
+    let (w, h) = deck_screen_size(n);
+    let made = (1..=n as u32).map(|i| display::Screen::create(&display::Screen::path_for(&template, i), w, h)).collect::<Result<Vec<_>, _>>()?;
+    log::info!("overdeck: {n} deck screen(s) of {w}x{h} ({template})");
+    Ok(Screens { template, made })
 }
 
 fn host(cfg: &Config) -> Result<Host> {
-    if cfg.dock {
+    // The decks draw into the unit's screen: make theirs before they start.
+    let screens = if cfg.display { Some(make_screens(cfg.decks.len())?) } else { None };
+    match &screens {
+        Some(s) => std::env::set_var("OVERDECK_DISPLAY", &s.template),
+        None => std::env::remove_var("OVERDECK_DISPLAY"),
+    }
+    if cfg.dock && screens.is_none() {
         // Before any deck starts its window system connection.
         std::env::set_var("OPENDECK_TILE", cfg.decks.len().to_string());
         if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("DISPLAY").is_some() {
@@ -98,7 +145,7 @@ fn host(cfg: &Config) -> Result<Host> {
         }
         None => None,
     };
-    Ok(Host { decks, mixer, panel: cfg.panel, screen: cfg.screen.clone() })
+    Ok(Host { decks, mixer, panel: cfg.panel, screen: cfg.screen.clone(), screens })
 }
 
 fn engine(cfg: &Config, h: &Host) -> (Engine, Sender, Vec<rtrb::Consumer<engine::Bands>>) {
@@ -243,6 +290,7 @@ fn start_panel(h: &Host) -> Option<panel::Panel> {
     let exe = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("overdeck-panel")));
     let mut args = vec![p.path.to_string_lossy().into_owned()];
     if aio { args.extend(["--screen".into(), "aio".into(), "--decks".into(), h.decks.len().to_string()]); }
+    if let Some(s) = &h.screens { args.extend(["--screens".into(), s.template.clone()]); }
     let spawn = |e: std::path::PathBuf| {
         let mut c = std::process::Command::new(e);
         c.args(&args);

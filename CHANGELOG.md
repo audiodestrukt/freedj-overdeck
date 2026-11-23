@@ -3,6 +3,21 @@
 ## [Unreleased]
 
 ### Added
+- All decks in one window. The display contract (`crates/display`): the
+  host makes a shared-memory screen per deck and names it in
+  `OVERDECK_DISPLAY`. A freedj deck draws its own screen into it
+  off-screen instead of opening a window, and takes back the touches on
+  it. `--aio` turns it on (`display = true` in a config); `--windows`
+  turns it off.
+  - The unit's screen has a DECKS view: each deck's live screen, touch
+    passed through to that deck, and (with two decks) the mixer under
+    them: knobs and a fader per channel, the crossfader and Master.
+  - A run that was killed leaves its screens behind; the next run clears
+    them.
+  - `OVERDECK_SHOT=path` saves the unit's screen to a PNG
+    (`OVERDECK_SHOT_AT` seconds in, default 8).
+  - An end-to-end test (`tests/display.rs`) has two real decks draw into
+    their screens and take a tap.
 - `overdeck run … --aio` opens an all-in-one unit's screen (1024×600),
   live: Overdeck's own UI, as it would run on a 4-channel all-in-one.
   - PERFORM has a scrolling three-band waveform per deck, drawn from the

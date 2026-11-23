@@ -2839,6 +2839,7 @@ dependencies = [
  "hound",
  "log",
  "odp",
+ "overdeck-display",
  "rtrb",
  "serde",
  "serde_json",
@@ -2865,6 +2866,7 @@ name = "overdeck-panel"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "overdeck-display",
  "serde",
  "serde_json",
 ]
