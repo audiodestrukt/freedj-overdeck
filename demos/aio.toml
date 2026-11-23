@@ -1,0 +1,33 @@
+# Four freedj decks on an all-in-one unit's screen (1024×600):
+#   overdeck run demos/aio.toml --aio
+# Set TRACK_A..TRACK_D below; BROWSE lists the other tracks in TRACK_A's
+# folder.  Deck A plays from 1 s; PLAY / CUE on the screen drive the decks;
+# LOAD puts a browsed track on any deck.  Close the screen to stop.
+sample_rate = 48000
+block = 512
+dock = true
+
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+track  = "TRACK_A"
+gain   = 0.5
+
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+track  = "TRACK_B"
+gain   = 0.5
+
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+track  = "TRACK_C"
+gain   = 0.5
+
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+track  = "TRACK_D"
+gain   = 0.5
+
+[[step]]
+at = 1.0
+deck = 0
+play = true

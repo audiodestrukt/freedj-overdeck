@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Added
+- `overdeck run … --aio` opens an all-in-one unit's screen (1024×600),
+  live: Overdeck's own UI, as it would run on a 4-channel all-in-one.
+  - PERFORM has a scrolling three-band waveform per deck, drawn from the
+    deck's actual output (the engine meters each deck's low, mid and high
+    bands every 10 ms). Each deck has a card with its title, pitch and
+    time, and CUE and PLAY keys that drive the real deck.
+  - BROWSE lists the tracks beside the decks' tracks, and LOAD puts one
+    on any deck while it runs.
+  - Closing the screen stops the run.
+  - `demos/aio.toml` runs four decks.
+- The panel protocol carries deck views, the library, and deck controls
+  and loads from the panel.
 - The mixer's panel (`overdeck-panel`) shows two channel strips (Trim,
   High, Mid and Low knobs, a fader), a Master knob and a crossfader. It
   shows the mixer's live values, so scripted automation moves it, and

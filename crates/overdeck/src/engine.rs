@@ -19,8 +19,45 @@ pub struct MixerStage {
     pub route: Route,
 }
 
+/// Each deck's low / mid / high level, a column per ~10 ms: the screen's
+/// scrolling waveforms are drawn from what the decks actually play.
+pub type Bands = [f32; 3];
+
+/// Splits a deck's output into three bands (one-pole filters: a picture,
+/// not a crossover) and sums each band's level over a column.
+struct BandMeter { lp: f32, lp2: f32, hp_x: f32, hp_y: f32, acc: [f32; 3], n: u32, k_lo: f32, k_hi: f32, per: u32 }
+
+impl BandMeter {
+    fn new(rate: f32) -> BandMeter {
+        let k = |hz: f32| 1.0 - (-2.0 * std::f32::consts::PI * hz / rate).exp();
+        BandMeter { lp: 0.0, lp2: 0.0, hp_x: 0.0, hp_y: 0.0, acc: [0.0; 3], n: 0, k_lo: k(200.0), k_hi: (-2.0 * std::f32::consts::PI * 2500.0 / rate).exp(), per: (rate / 100.0) as u32 }
+    }
+    fn run(&mut self, l: &[f32], r: &[f32], tx: &mut rtrb::Producer<Bands>) {
+        for (a, b) in l.iter().zip(r) {
+            let x = 0.5 * (a + b);
+            self.lp += self.k_lo * (x - self.lp);
+            self.lp2 += self.k_lo * (self.lp - self.lp2);
+            let hy = self.k_hi * (self.hp_y + x - self.hp_x);   // one-pole high-pass
+            self.hp_x = x;
+            self.hp_y = hy;
+            let mid = x - self.lp2 - hy;
+            self.acc[0] += self.lp2.abs();
+            self.acc[1] += mid.abs();
+            self.acc[2] += hy.abs();
+            self.n += 1;
+            if self.n >= self.per {
+                let n = self.n as f32;
+                let _ = tx.push([self.acc[0] / n, self.acc[1] / n, self.acc[2] / n]);   // full: the screen is behind; drop
+                self.acc = [0.0; 3];
+                self.n = 0;
+            }
+        }
+    }
+}
+
 pub struct Engine {
     procs: Vec<Processor>,
+    meters: Vec<(BandMeter, rtrb::Producer<Bands>)>,
     /// A deck's own route to the device (None: it only feeds the mixer).
     routes: Vec<Option<Route>>,
     mixer: Option<MixerStage>,
@@ -46,16 +83,21 @@ impl Sender {
 }
 
 impl Engine {
-    pub fn new(procs: Vec<Processor>, routes: Vec<Option<Route>>, mixer: Option<MixerStage>, channels: usize, max_block: usize) -> (Engine, Sender) {
+    /// The engine, the main thread's sender, and each deck's band columns.
+    pub fn new(procs: Vec<Processor>, routes: Vec<Option<Route>>, mixer: Option<MixerStage>, channels: usize, max_block: usize, rate: u32) -> (Engine, Sender, Vec<rtrb::Consumer<Bands>>) {
         let n = procs.len();
+        let (meters, bands): (Vec<_>, Vec<_>) = (0..n).map(|_| {
+            let (tx, rx) = rtrb::RingBuffer::new(512);
+            ((BandMeter::new(rate as f32), tx), rx)
+        }).unzip();
         let rings = n + usize::from(mixer.is_some());
         let (tx, rx): (Vec<_>, Vec<_>) = (0..rings).map(|_| rtrb::RingBuffer::new(1024)).unzip();
         (Engine {
-            procs, routes, mixer, rx, channels,
+            procs, meters, routes, mixer, rx, channels,
             ev: Vec::with_capacity(256),
             last: (0..n).map(|_| (vec![0.0; max_block], vec![0.0; max_block])).collect(),
             mix: (vec![0.0; max_block], vec![0.0; max_block]),
-        }, Sender(tx))
+        }, Sender(tx), bands)
     }
 
     pub fn channels(&self) -> usize { self.channels }
@@ -82,6 +124,8 @@ impl Engine {
                 r.fill(0.0);
             }
             if let Some(route) = &self.routes[i] { add(out, self.channels, route, l, r); }
+            let (m, tx) = &mut self.meters[i];
+            m.run(l, r, tx);
         }
         if self.mixer.is_some() {
             self.events(self.procs.len());

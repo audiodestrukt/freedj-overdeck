@@ -1,4 +1,5 @@
-//! overdeck-panel <socket>: the mixer's panel.
+//! overdeck-panel <socket> [--screen aio --decks N]: the mixer's panel, or
+//! an all-in-one unit's screen (`aio.rs`).
 //!
 //! Connects to a running Overdeck's panel socket, shows the mixer's
 //! parameters as a mixer (two channel strips: Trim, High / Mid / Low knobs,
@@ -11,19 +12,49 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use serde::Deserialize;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+
+mod aio;
 
 #[derive(Deserialize, Clone)]
 struct Param { id: u32, name: String, value: f64, text: String, default: f64 }
 
+/// A deck as the host shows it, with the waveform columns so far.
 #[derive(Default)]
-struct State {
-    params: Vec<Param>,
-    connected: bool,
+pub struct Deck {
+    pub title: String,
+    pub playing: bool,
+    pub pitch: String,
+    pub elapsed: f64,
+    pub wave: VecDeque<[f32; 3]>,
 }
 
 #[derive(Deserialize)]
-struct Msg { kind: String, params: Option<Vec<Param>>, values: Option<Vec<(u32, f64, String)>> }
+struct DeckMsg { title: String, playing: bool, pitch: String, elapsed: f64, cols: Vec<[f32; 3]> }
+
+#[derive(Deserialize, Clone)]
+pub struct Track { pub path: String, pub title: String }
+
+/// How many waveform columns a deck keeps (10 ms each).
+pub const WAVE_COLS: usize = 1200;
+
+#[derive(Default)]
+pub struct State {
+    params: Vec<Param>,
+    connected: bool,
+    pub decks: Vec<Deck>,
+    pub library: Vec<Track>,
+}
+
+#[derive(Deserialize)]
+struct Msg {
+    kind: String,
+    params: Option<Vec<Param>>,
+    values: Option<Vec<(u32, f64, String)>>,
+    decks: Option<Vec<DeckMsg>>,
+    tracks: Option<Vec<Track>>,
+}
 
 struct App {
     state: Arc<Mutex<State>>,
@@ -34,15 +65,20 @@ struct App {
 }
 
 fn main() -> eframe::Result<()> {
-    let path = std::env::args().nth(1).expect("usage: overdeck-panel <socket>");
+    let args: Vec<String> = std::env::args().collect();
+    let path = args.get(1).cloned().expect("usage: overdeck-panel <socket> [--screen aio --decks N]");
+    let flag = |n: &str| args.iter().position(|a| a == n).and_then(|i| args.get(i + 1)).cloned();
+    let aio = flag("--screen").as_deref() == Some("aio");
+    let n_decks: usize = flag("--decks").and_then(|v| v.parse().ok()).unwrap_or(4);
     let stream = UnixStream::connect(&path).unwrap_or_else(|e| panic!("connect {path}: {e}"));
     let state = Arc::new(Mutex::new(State { connected: true, ..Default::default() }));
     let out = stream.try_clone().expect("clone socket");
+    let (title, size) = if aio { ("Overdeck", [1024.0, 600.0]) } else { ("Overdeck Mixer", [640.0, 470.0]) };
     let opts = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_title("Overdeck Mixer").with_inner_size([640.0, 470.0]),
+        viewport: egui::ViewportBuilder::default().with_title(title).with_inner_size(size).with_resizable(!aio),
         ..Default::default()
     };
-    eframe::run_native("Overdeck Mixer", opts, Box::new(move |cc| {
+    eframe::run_native(title, opts, Box::new(move |cc| {
         let ctx = cc.egui_ctx.clone();
         ctx.set_visuals(egui::Visuals::dark());
         let st = Arc::clone(&state);
@@ -56,6 +92,19 @@ fn main() -> eframe::Result<()> {
                     "values" => for (id, v, t) in m.values.unwrap_or_default() {
                         if let Some(p) = s.params.iter_mut().find(|p| p.id == id) { p.value = v; p.text = t; }
                     },
+                    "library" => s.library = m.tracks.unwrap_or_default(),
+                    "decks" => {
+                        let ds = m.decks.unwrap_or_default();
+                        if s.decks.len() < ds.len() { s.decks.resize_with(ds.len(), Deck::default); }
+                        for (d, m) in s.decks.iter_mut().zip(ds) {
+                            d.title = m.title;
+                            d.playing = m.playing;
+                            d.pitch = m.pitch;
+                            d.elapsed = m.elapsed;
+                            d.wave.extend(m.cols);
+                            while d.wave.len() > WAVE_COLS { d.wave.pop_front(); }
+                        }
+                    }
                     _ => {}
                 }
                 drop(s);
@@ -64,7 +113,10 @@ fn main() -> eframe::Result<()> {
             st.lock().unwrap().connected = false;
             ctx.request_repaint();
         });
-        Ok(Box::new(App { state, out, placed: false, held: None }))
+        if aio {
+            return Ok(Box::new(aio::Screen::new(state, out, n_decks)) as Box<dyn eframe::App>);
+        }
+        Ok(Box::new(App { state, out, placed: false, held: None }) as Box<dyn eframe::App>)
     }))
 }
 

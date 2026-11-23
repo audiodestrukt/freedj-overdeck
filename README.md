@@ -57,6 +57,21 @@ by side. With `panel = true` the mixer's panel opens below them
 (`cargo build --release -p overdeck-panel` first). It moves with the
 automation, and you can take any control yourself.
 
+## The all-in-one screen
+
+```sh
+cargo build --release
+./target/release/overdeck run demos/aio.toml --aio     # set TRACK_A..D in it first
+```
+
+This is a 1024×600 screen, as Overdeck would look on a 4-channel
+all-in-one:
+- PERFORM: each deck's live three-band waveform (from its actual output)
+  and a card with CUE and PLAY that drive the deck;
+- BROWSE: tracks to LOAD onto any deck.
+
+Closing it stops Overdeck. See docs/ALL-IN-ONE.md.
+
 In freedj-3000, `make plugin` builds and installs `~/.clap/OpenDeck.clap`.
 
 ## Crates

@@ -42,6 +42,10 @@ pub struct Config {
     /// Open the mixer's panel (`overdeck-panel`, beside this binary).
     #[serde(default)]
     pub panel: bool,
+    /// The panel's screen: "mixer" (default) or "aio", an all-in-one unit's
+    /// 1024×600 screen (four decks, browse).  `overdeck run … --aio` sets it.
+    #[serde(default)]
+    pub screen: Option<String>,
     #[serde(rename = "deck", default)]
     pub decks: Vec<DeckCfg>,
     #[serde(rename = "step", default)]

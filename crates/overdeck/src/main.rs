@@ -1,7 +1,8 @@
 //! overdeck: a plugin host for decks.
 //!
 //!   overdeck list   <bundle.clap>                 what a bundle offers, and its parameters
-//!   overdeck run    <overdeck.toml> [--seconds N] decks to the sound card
+//!   overdeck run    <overdeck.toml> [--seconds N] [--aio]  decks to the sound card
+//!                                                 (--aio: an all-in-one unit's screen)
 //!   overdeck render <overdeck.toml> --seconds N --out DIR
 //!                                                 decks to WAV (mix + one stem a deck),
 //!                                                 paced at real time, as the decks expect
@@ -33,7 +34,9 @@ fn main() -> Result<()> {
         Some("list") => list(Path::new(args.get(2).context("list <bundle.clap>")?)),
         Some("run") => {
             let secs = flag("--seconds").map(|s| s.parse::<f64>()).transpose()?;
-            run(&Config::load(Path::new(args.get(2).context("run <overdeck.toml>")?))?, secs)
+            let mut cfg = Config::load(Path::new(args.get(2).context("run <overdeck.toml>")?))?;
+            if args.iter().any(|a| a == "--aio") { cfg.panel = true; cfg.screen = Some("aio".into()); }
+            run(&cfg, secs)
         }
         Some("render") => {
             let secs: f64 = flag("--seconds").context("render needs --seconds")?.parse()?;
@@ -71,6 +74,7 @@ struct Host {
     decks: Vec<Deck>,
     mixer: Option<clap_host::Instance>,
     panel: bool,
+    screen: Option<String>,
 }
 
 fn host(cfg: &Config) -> Result<Host> {
@@ -93,16 +97,16 @@ fn host(cfg: &Config) -> Result<Host> {
         }
         None => None,
     };
-    Ok(Host { decks, mixer, panel: cfg.panel })
+    Ok(Host { decks, mixer, panel: cfg.panel, screen: cfg.screen.clone() })
 }
 
-fn engine(cfg: &Config, h: &Host) -> (Engine, Sender) {
+fn engine(cfg: &Config, h: &Host) -> (Engine, Sender, Vec<rtrb::Consumer<engine::Bands>>) {
     let procs = h.decks.iter().map(|d| d.inst.processor()).collect();
     let routes = h.decks.iter().map(|d| cfg.deck_out(&d.cfg).map(|out| Route { out, gain: d.cfg.gain })).collect();
     let mixer = h.mixer.as_ref().zip(cfg.mixer.as_ref()).map(|(inst, m)| MixerStage {
         proc: inst.processor(), inputs: m.inputs.clone(), route: Route { out: m.out, gain: 1.0 },
     });
-    Engine::new(procs, routes, mixer, cfg.channels(), cfg.block as usize * 4)
+    Engine::new(procs, routes, mixer, cfg.channels(), cfg.block as usize * 4, cfg.sample_rate)
 }
 
 /// One `[[automate]]`, resolved to a plugin and a parameter.
@@ -133,9 +137,15 @@ fn drivers(cfg: &Config) -> Result<Vec<Box<dyn Driver>>> {
 
 /// The main thread's loop until `done`: hardware → ODP → decks, scripted
 /// parameter moves, and the plugins' main-thread callbacks.
-fn main_loop(h: &mut Host, autos: &mut [Auto], drivers: &mut [Box<dyn Driver>], tx: &mut Sender, done: &AtomicBool) {
+fn main_loop(h: &mut Host, autos: &mut [Auto], drivers: &mut [Box<dyn Driver>], tx: &mut Sender, bands: &mut [rtrb::Consumer<engine::Bands>], done: &AtomicBool) {
     let mut panel = start_panel(h);
-    let mut moves = Vec::new();
+    let mut cmds = Vec::new();
+    let library = library(h);
+    let mut views: Vec<panel::DeckView> = h.decks.iter().map(|d| panel::DeckView {
+        title: d.cfg.track.as_deref().map(track_title).unwrap_or_else(|| "(no track)".into()),
+        ..Default::default()
+    }).collect();
+    let mut last_tick = Instant::now();
     let t0 = Instant::now();
     let mut inputs = Vec::new();
     let mut evs = Vec::new();
@@ -171,10 +181,49 @@ fn main_loop(h: &mut Host, autos: &mut [Auto], drivers: &mut [Box<dyn Driver>], 
                 None => { log::warn!("overdeck: {} won't take {plain} for {}", c.target, c.param); a.done = true; }
             }
         }
-        if let (Some(p), Some(m)) = (&mut panel, &h.mixer) {
-            moves.clear();
-            p.poll(m, &mut moves);
-            for &(id, value) in &moves { tx.send(decks.len(), clap_host::ParamEvent { frame: 0, id, value }); }
+        // What the screen shows of each deck.
+        let dt = last_tick.elapsed().as_secs_f64();
+        last_tick = Instant::now();
+        for (i, v) in views.iter_mut().enumerate() {
+            while let Ok(b) = bands[i].pop() { v.cols.push(b); }
+            let inst = &decks[i].inst;
+            v.playing = inst.param("Play").and_then(|p| inst.get_value(p.id)).is_some_and(|x| x > 0.5);
+            if let Some(p) = inst.param("Pitch") {
+                if let Some(x) = inst.get_value(p.id) { v.pitch = inst.value_to_text(p.id, x).unwrap_or_default(); }
+            }
+            let pct: f64 = v.pitch.trim().trim_end_matches('%').trim().parse().unwrap_or(0.0);
+            if v.playing { v.elapsed += dt * (1.0 + pct / 100.0); }
+        }
+        if let Some(p) = &mut panel {
+            cmds.clear();
+            p.poll(h.mixer.as_ref(), &mut views, &library, &mut cmds);
+            // The unit's screen is the app: closing it ends the run.
+            if p.ended && h.screen.as_deref() == Some("aio") { log::info!("overdeck: the screen closed; stopping"); break; }
+            for c in cmds.drain(..) {
+                match c {
+                    panel::Cmd::Set(id, value) => tx.send(decks.len(), clap_host::ParamEvent { frame: 0, id, value }),
+                    panel::Cmd::Deck(d, control) => if let Some(deck) = decks.get_mut(d as usize) {
+                        log::info!("overdeck: screen: deck {d} {control:?}");
+                        if matches!(control, odp::Control::Cue(true)) { views[d as usize].elapsed = 0.0; }
+                        evs.clear();
+                        deck.adapter.map(control, &mut evs);
+                        for e in &evs { tx.send(d as usize, *e); }
+                    },
+                    panel::Cmd::Load(d, path) => if let Some(deck) = decks.get(d as usize) {
+                        match deck::set_track(&deck.inst, &path) {
+                            Ok(()) => {
+                                log::info!("overdeck: screen: deck {d} loads {}", path.display());
+                                let v = &mut views[d as usize];
+                                v.title = track_title(&path.to_string_lossy());
+                                v.elapsed = 0.0;
+                            }
+                            Err(e) => log::warn!("overdeck: deck {d} can't load {}: {e:#}", path.display()),
+                        }
+                    },
+                }
+            }
+        } else {
+            for v in views.iter_mut() { v.cols.clear(); }
         }
         for d in decks.iter() { d.inst.idle(); }
         if let Some(m) = &h.mixer { m.idle(); }
@@ -184,24 +233,47 @@ fn main_loop(h: &mut Host, autos: &mut [Auto], drivers: &mut [Box<dyn Driver>], 
 
 /// The mixer's panel, if asked for: listen, and start `overdeck-panel`.
 fn start_panel(h: &Host) -> Option<panel::Panel> {
-    if !h.panel || h.mixer.is_none() { return None; }
+    let aio = h.screen.as_deref() == Some("aio");
+    if !h.panel || (h.mixer.is_none() && !aio) { return None; }
     let p = match panel::Panel::listen() {
         Ok(p) => p,
         Err(e) => { log::warn!("panel: can't listen: {e}"); return None; }
     };
     let exe = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("overdeck-panel")));
-    match exe.map(|e| std::process::Command::new(e).arg(&p.path).spawn()) {
+    let mut args = vec![p.path.to_string_lossy().into_owned()];
+    if aio { args.extend(["--screen".into(), "aio".into(), "--decks".into(), h.decks.len().to_string()]); }
+    match exe.map(|e| std::process::Command::new(e).args(&args).spawn()) {
         Some(Ok(_)) => log::info!("panel: started ({})", p.path.display()),
         _ => log::warn!("panel: couldn't start overdeck-panel (build it: cargo build --release -p overdeck-panel); connect one to {}", p.path.display()),
     }
     Some(p)
 }
 
+/// A track's name for the screen: its file name without the extension.
+fn track_title(path: &str) -> String {
+    let p = config::expand(path);
+    p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned())
+}
+
+/// The tracks the screen can browse: audio files beside the first deck's
+/// track (a stand-in for the library service the host will run).
+fn library(h: &Host) -> Vec<(String, String)> {
+    let Some(dir) = h.decks.iter().find_map(|d| d.cfg.track.as_deref()).and_then(|t| config::expand(t).parent().map(Path::to_path_buf)) else { return Vec::new() };
+    let mut out: Vec<(String, String)> = std::fs::read_dir(&dir).into_iter().flatten().flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["mp3", "wav", "flac", "m4a", "aif", "aiff", "ogg"].contains(&e.to_ascii_lowercase().as_str())))
+        .map(|p| (p.to_string_lossy().into_owned(), track_title(&p.to_string_lossy())))
+        .collect();
+    out.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    out.truncate(300);
+    out
+}
+
 fn run(cfg: &Config, secs: Option<f64>) -> Result<()> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let mut h = host(cfg)?;
     let mut autos = automation(cfg, &h)?;
-    let (mut eng, mut tx) = engine(cfg, &h);
+    let (mut eng, mut tx, mut bands) = engine(cfg, &h);
     let device = cpal::default_host().default_output_device().context("no audio output device")?;
     let sc = cpal::StreamConfig {
         channels: eng.channels() as u16,
@@ -216,7 +288,7 @@ fn run(cfg: &Config, secs: Option<f64>) -> Result<()> {
         let d = Arc::clone(&done);
         std::thread::spawn(move || { std::thread::sleep(Duration::from_secs_f64(s)); d.store(true, Ordering::Release) });
     }
-    main_loop(&mut h, &mut autos, &mut drivers(cfg)?, &mut tx, &done);
+    main_loop(&mut h, &mut autos, &mut drivers(cfg)?, &mut tx, &mut bands, &done);
     drop(stream);   // the processors go with the stream, before the instances
     Ok(())
 }
@@ -225,7 +297,7 @@ fn render(cfg: &Config, secs: f64, dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     let mut h = host(cfg)?;
     let mut autos = automation(cfg, &h)?;
-    let (mut eng, mut tx) = engine(cfg, &h);
+    let (mut eng, mut tx, mut bands) = engine(cfg, &h);
     let done = Arc::new(AtomicBool::new(false));
     let (rate, block, n) = (cfg.sample_rate, cfg.block as usize, h.decks.len());
     let total = (secs * f64::from(rate)) as usize;
@@ -260,7 +332,7 @@ fn render(cfg: &Config, secs: f64, dir: &Path) -> Result<()> {
         drop(eng);   // the processors stop on this thread, as CLAP wants
         Ok(())
     })?;
-    main_loop(&mut h, &mut autos, &mut drivers(cfg)?, &mut tx, &done);
+    main_loop(&mut h, &mut autos, &mut drivers(cfg)?, &mut tx, &mut bands, &done);
     audio.join().map_err(|_| anyhow::anyhow!("audio thread panicked"))??;
     log::info!("overdeck: wrote {}", dir.display());
     Ok(())
