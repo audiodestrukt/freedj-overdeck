@@ -17,7 +17,7 @@ mod engine;
 use anyhow::{bail, Context, Result};
 use config::Config;
 use deck::{Bundles, Deck};
-use engine::{Engine, Route, Sender};
+use engine::{Engine, MixerStage, Route, Sender};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -65,10 +65,55 @@ fn decks(cfg: &Config) -> Result<Vec<Deck>> {
     }).collect()
 }
 
-fn engine(cfg: &Config, decks: &[Deck]) -> (Engine, Sender) {
-    let procs = decks.iter().map(|d| d.inst.processor()).collect();
-    let routes = decks.iter().map(|d| Route { out: d.cfg.out, gain: d.cfg.gain }).collect();
-    Engine::new(procs, routes, cfg.channels(), cfg.block as usize * 4)
+/// The decks and the mixer: every plugin instance, on the main thread.
+struct Host {
+    decks: Vec<Deck>,
+    mixer: Option<clap_host::Instance>,
+}
+
+fn host(cfg: &Config) -> Result<Host> {
+    let decks = decks(cfg)?;
+    let mixer = match &cfg.mixer {
+        Some(m) => {
+            let b = Arc::new(clap_host::Bundle::load(&config::expand(&m.plugin))?);
+            let mut inst = b.instantiate(m.id.as_deref())?;
+            inst.activate(f64::from(cfg.sample_rate), 1, cfg.block.max(4096))?;
+            log::info!("overdeck: mixer up ({}), decks {:?} into its inputs", m.plugin, m.inputs);
+            Some(inst)
+        }
+        None => None,
+    };
+    Ok(Host { decks, mixer })
+}
+
+fn engine(cfg: &Config, h: &Host) -> (Engine, Sender) {
+    let procs = h.decks.iter().map(|d| d.inst.processor()).collect();
+    let routes = h.decks.iter().map(|d| cfg.deck_out(&d.cfg).map(|out| Route { out, gain: d.cfg.gain })).collect();
+    let mixer = h.mixer.as_ref().zip(cfg.mixer.as_ref()).map(|(inst, m)| MixerStage {
+        proc: inst.processor(), inputs: m.inputs.clone(), route: Route { out: m.out, gain: 1.0 },
+    });
+    Engine::new(procs, routes, mixer, cfg.channels(), cfg.block as usize * 4)
+}
+
+/// One `[[automate]]`, resolved to a plugin and a parameter.
+struct Auto {
+    cfg: config::Automate,
+    /// The plugin: decks by index, the mixer after them.
+    target: usize,
+    id: u32,
+    done: bool,
+}
+
+fn automation(cfg: &Config, h: &Host) -> Result<Vec<Auto>> {
+    cfg.automation.iter().map(|a| {
+        let (target, inst) = match a.target.as_str() {
+            "mixer" => (h.decks.len(), h.mixer.as_ref().context("no mixer")?),
+            t => { let d: usize = t.parse()?; (d, &h.decks[d].inst) }
+        };
+        let p = inst.param(&a.param).with_context(|| format!("{} has no parameter {:?} (it has {:?})", a.target, a.param,
+            inst.params().iter().map(|p| &p.name).collect::<Vec<_>>()))?;
+        Ok(Auto { cfg: a.clone(), target, id: p.id, done: false })
+    }).collect()
 }
 
 fn drivers(cfg: &Config) -> Result<Vec<Box<dyn Driver>>> {
@@ -76,11 +121,14 @@ fn drivers(cfg: &Config) -> Result<Vec<Box<dyn Driver>>> {
     Ok(vec![Box::new(surface::Script::new("script", steps))])
 }
 
-/// The main thread's loop until `done`: hardware → ODP → decks; plugin idle.
-fn main_loop(decks: &mut [Deck], drivers: &mut [Box<dyn Driver>], tx: &mut Sender, done: &AtomicBool) {
+/// The main thread's loop until `done`: hardware → ODP → decks, scripted
+/// parameter moves, and the plugins' main-thread callbacks.
+fn main_loop(h: &mut Host, autos: &mut [Auto], drivers: &mut [Box<dyn Driver>], tx: &mut Sender, done: &AtomicBool) {
     let t0 = Instant::now();
     let mut inputs = Vec::new();
     let mut evs = Vec::new();
+    let mut last: std::collections::HashMap<(usize, u32), f64> = Default::default();
+    let decks = &mut h.decks;
     while !done.load(Ordering::Acquire) {
         let now = t0.elapsed();
         inputs.clear();
@@ -92,15 +140,36 @@ fn main_loop(decks: &mut [Deck], drivers: &mut [Box<dyn Driver>], tx: &mut Sende
             deck.adapter.map(i.control, &mut evs);
             for e in &evs { tx.send(i.deck as usize, *e); }
         }
+        // Scripted parameter moves, in the parameter's own units.
+        let t = now.as_secs_f64();
+        for a in autos.iter_mut().filter(|a| !a.done && t >= a.cfg.at) {
+            let c = &a.cfg;
+            let plain = match c.to {
+                Some(end) if end > c.at && t < end => {
+                    let from = c.from.or_else(|| last.get(&(a.target, a.id)).copied()).unwrap_or(c.value);
+                    from + (c.value - from) * (t - c.at) / (end - c.at)
+                }
+                _ => { a.done = true; c.value }
+            };
+            if a.done { log::info!("overdeck: {t:6.2} s {} {} = {}", c.target, c.param, c.value); }
+            last.insert((a.target, a.id), plain);
+            let inst = if a.target < decks.len() { &decks[a.target].inst } else { h.mixer.as_ref().unwrap() };
+            match inst.text_to_value(a.id, &format!("{plain}")) {
+                Some(v) => tx.send(a.target, clap_host::ParamEvent { frame: 0, id: a.id, value: v }),
+                None => { log::warn!("overdeck: {} won't take {plain} for {}", c.target, c.param); a.done = true; }
+            }
+        }
         for d in decks.iter() { d.inst.idle(); }
+        if let Some(m) = &h.mixer { m.idle(); }
         std::thread::sleep(Duration::from_millis(2));
     }
 }
 
 fn run(cfg: &Config, secs: Option<f64>) -> Result<()> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    let mut decks = decks(cfg)?;
-    let (mut eng, mut tx) = engine(cfg, &decks);
+    let mut h = host(cfg)?;
+    let mut autos = automation(cfg, &h)?;
+    let (mut eng, mut tx) = engine(cfg, &h);
     let device = cpal::default_host().default_output_device().context("no audio output device")?;
     let sc = cpal::StreamConfig {
         channels: eng.channels() as u16,
@@ -115,17 +184,18 @@ fn run(cfg: &Config, secs: Option<f64>) -> Result<()> {
         let d = Arc::clone(&done);
         std::thread::spawn(move || { std::thread::sleep(Duration::from_secs_f64(s)); d.store(true, Ordering::Release) });
     }
-    main_loop(&mut decks, &mut drivers(cfg)?, &mut tx, &done);
+    main_loop(&mut h, &mut autos, &mut drivers(cfg)?, &mut tx, &done);
     drop(stream);   // the processors go with the stream, before the instances
     Ok(())
 }
 
 fn render(cfg: &Config, secs: f64, dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir)?;
-    let mut decks = decks(cfg)?;
-    let (mut eng, mut tx) = engine(cfg, &decks);
+    let mut h = host(cfg)?;
+    let mut autos = automation(cfg, &h)?;
+    let (mut eng, mut tx) = engine(cfg, &h);
     let done = Arc::new(AtomicBool::new(false));
-    let (rate, block, n) = (cfg.sample_rate, cfg.block as usize, decks.len());
+    let (rate, block, n) = (cfg.sample_rate, cfg.block as usize, h.decks.len());
     let total = (secs * f64::from(rate)) as usize;
     let dir2 = dir.to_owned();
     let d2 = Arc::clone(&done);
@@ -158,7 +228,7 @@ fn render(cfg: &Config, secs: f64, dir: &Path) -> Result<()> {
         drop(eng);   // the processors stop on this thread, as CLAP wants
         Ok(())
     })?;
-    main_loop(&mut decks, &mut drivers(cfg)?, &mut tx, &done);
+    main_loop(&mut h, &mut autos, &mut drivers(cfg)?, &mut tx, &done);
     audio.join().map_err(|_| anyhow::anyhow!("audio thread panicked"))??;
     log::info!("overdeck: wrote {}", dir.display());
     Ok(())

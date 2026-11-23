@@ -1,0 +1,85 @@
+# Two freedj decks through the reference mixer: a crossfade with a bass swap.
+#   overdeck run demos/two-deck-mix.toml --seconds 42
+# Tracks: set TRACK_A / TRACK_B paths below (the tracks aren't beatmatched:
+# this shows the mixer, not a mix).
+sample_rate = 48000
+block = 256
+
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+track  = "TRACK_A"
+
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+track  = "TRACK_B"
+
+[mixer]
+plugin = "target/release/liboverdeck_mixer.so"   # or ~/.clap/OverdeckMixer.clap
+inputs = [0, 1]
+out    = [0, 1]
+
+# Start: all on A; B's bass killed for the swap later.
+[[automate]]
+at = 0.0
+target = "mixer"
+param = "Crossfader"
+value = 0.0
+
+[[automate]]
+at = 0.0
+target = "mixer"
+param = "B Low"
+value = -26.0
+
+[[step]]
+at = 1.0
+deck = 0
+play = true
+
+[[step]]
+at = 8.0
+deck = 1
+play = true
+
+# Bring B in to the middle.
+[[automate]]
+at = 12.0
+to = 20.0
+target = "mixer"
+param = "Crossfader"
+from = 0.0
+value = 0.5
+
+# The bass swap: A's lows out, B's in, over one second.
+[[automate]]
+at = 20.0
+to = 21.0
+target = "mixer"
+param = "A Low"
+from = 0.0
+value = -26.0
+
+[[automate]]
+at = 20.0
+to = 21.0
+target = "mixer"
+param = "B Low"
+from = -26.0
+value = 0.0
+
+# Over to B, then A's fader down.
+[[automate]]
+at = 24.0
+to = 32.0
+target = "mixer"
+param = "Crossfader"
+from = 0.5
+value = 1.0
+
+[[automate]]
+at = 34.0
+to = 38.0
+target = "mixer"
+param = "A Fader"
+from = 1.0
+value = 0.0

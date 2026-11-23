@@ -159,11 +159,27 @@ The hard part of Overbridge-style integration is clocking and latency, not
 the protocol. Starting with class-compliant UAC2 for audio and keeping the
 custom part to control and display avoids almost all of it.
 
-## 6. What runs today
+## 6. Mixing
+
+Overdeck has a mixer stage: one plugin whose input ports are fed by decks
+(`[mixer] inputs = [0, 1]`), with its output routed to the device. Any
+CLAP mixer can sit there. `crates/mixer` is the reference one, a test
+instrument: Trim, a three-band isolator EQ, Faders, a constant-power
+Crossfader. Decks without an `out` feed only the mixer. Any plugin's
+parameter can be scripted with `[[automate]]` (set or ramped, in the
+parameter's own units). Later the same router takes ODP for the mixer's
+controls from hardware: faders and EQ knobs are surface drivers too.
+
+## 7. What runs today
 
 - `overdeck render`/`run` loads freedj-3000's CLAP, runs N decks, each
   with its own track (written into the plugin's state) and its own output
   channels, driven by scripted ODP inputs.
+- Two decks through the reference mixer, with a scripted crossfade and
+  bass swap, in `demos/two-deck-mix.toml`. It played live on the desktop's
+  sound card with one ALSA underrun in 42 s at 256-frame blocks (still to
+  look into). A second end-to-end test checks that the crossfader selects
+  each deck and that A's low kill removes the bass.
 - An end-to-end test (`OVERDECK_E2E=1 cargo test`) runs two real decks: deck
   0 silent until its PLAY at 3 s, deck 1 silent until its PLAY at 8 s,
   each on its own channels of the mix.
@@ -181,7 +197,7 @@ custom part to control and display avoids almost all of it.
 - **Not on a Pi yet.** Nothing has been run on a Pi 5. Overdeck is pure
   Rust plus cpal (ALSA), but freedj's CLAP has to be built for aarch64.
 
-## 7. Order of work
+## 8. Order of work
 
 1. **Pi 5 bring-up:** build OpenDeck.clap for aarch64 and run two decks
    from `overdeck run` on the Pi's audio, under labwc.

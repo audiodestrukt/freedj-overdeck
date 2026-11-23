@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- A reference DJ mixer plugin (`crates/mixer`, CLAP and VST3) for testing
+  decks. It has Trim, a three-band isolator EQ with full kills, channel
+  Faders, a constant-power Crossfader and Master, and unit-tested DSP.
+  `tools/install-mixer.sh` installs it for DAWs.
+- Overdeck's mixer stage: decks feed a mixer plugin's input ports, and the
+  mixer goes to the device.
+- `[[automate]]`: scripted parameter moves for any plugin, set or ramped
+  in the parameter's own units.
+- The CLAP host gives plugins audio inputs, with no allocation per block.
+- `demos/two-deck-mix.toml`: a crossfade with a bass swap. An end-to-end
+  test checks the crossfader and EQ on real decks.
 - Overdeck, a plugin host for decks: loads freedj-3000's CLAP plugin and
   runs any number of decks in one process. Each deck gets its own track
   (written into the plugin's state) and its own output channels.

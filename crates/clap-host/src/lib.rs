@@ -303,6 +303,9 @@ impl Drop for Instance {
 
 // ── the audio-thread half ────────────────────────────────────────────────
 
+/// The most stereo input ports a plugin gets.
+pub const MAX_INPUTS: usize = 4;
+
 /// A parameter change for the next block, at a frame within it.
 #[derive(Clone, Copy, Debug)]
 pub struct ParamEvent {
@@ -332,6 +335,12 @@ impl Processor {
     /// Process one block into `left` / `right` (same length), with `events`
     /// (sorted by frame).  Starts processing on the first call.
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32], events: &[ParamEvent]) -> Result<()> {
+        self.process_with_inputs(&[], left, right, events)
+    }
+
+    /// The same, with stereo audio inputs (one per input port, in the
+    /// plugin's port order: main first, then aux).
+    pub fn process_with_inputs(&mut self, inputs: &[[&[f32]; 2]], left: &mut [f32], right: &mut [f32], events: &[ParamEvent]) -> Result<()> {
         let frames = left.len().min(right.len());
         if !self.started {
             if !unsafe { ((*self.h.plugin).start_processing.ok_or_else(|| anyhow!("no start_processing"))?)(self.h.plugin) } {
@@ -358,14 +367,28 @@ impl Processor {
         for o in &mut self.outs { o.resize(frames, 0.0); }
         let mut chans = [self.outs[0].as_mut_ptr(), self.outs[1].as_mut_ptr()];
         let mut out = clap_audio_buffer { data32: chans.as_mut_ptr(), data64: ptr::null_mut(), channel_count: 2, latency: 0, constant_mask: 0 };
+        // CLAP wants mutable pointers even for inputs; it doesn't write them.
+        // On the stack: nothing allocates per block.  Up to MAX_INPUTS ports.
+        if inputs.len() > MAX_INPUTS { bail!("{} input ports; at most {MAX_INPUTS}", inputs.len()); }
+        let mut in_ptrs = [[ptr::null_mut::<f32>(); 2]; MAX_INPUTS];
+        for (p, [l, r]) in in_ptrs.iter_mut().zip(inputs) {
+            if l.len() < frames || r.len() < frames { bail!("an input is shorter than the block"); }
+            *p = [l.as_ptr() as *mut f32, r.as_ptr() as *mut f32];
+        }
+        let empty = clap_audio_buffer { data32: ptr::null_mut(), data64: ptr::null_mut(), channel_count: 0, latency: 0, constant_mask: 0 };
+        let mut in_bufs = [empty; MAX_INPUTS];
+        for (b, p) in in_bufs.iter_mut().zip(in_ptrs.iter_mut()).take(inputs.len()) {
+            *b = clap_audio_buffer { data32: p.as_mut_ptr(), data64: ptr::null_mut(), channel_count: 2, latency: 0, constant_mask: 0 };
+        }
+        let in_bufs = &in_bufs[..inputs.len()];
         let ins = clap_input_events { ctx: &self.events as *const _ as *mut c_void, size: Some(ev_size), get: Some(ev_get) };
         let outs = clap_output_events { ctx: ptr::null_mut(), try_push: Some(ev_push) };
         let p = clap_process {
             steady_time: self.steady,
             frames_count: frames as u32,
             transport: ptr::null(),
-            audio_inputs: ptr::null(), audio_outputs: &mut out,
-            audio_inputs_count: 0, audio_outputs_count: 1,
+            audio_inputs: if in_bufs.is_empty() { ptr::null() } else { in_bufs.as_ptr() }, audio_outputs: &mut out,
+            audio_inputs_count: in_bufs.len() as u32, audio_outputs_count: 1,
             in_events: &ins, out_events: &outs,
         };
         let st = unsafe { ((*self.h.plugin).process.ok_or_else(|| anyhow!("no process"))?)(self.h.plugin, &p) };

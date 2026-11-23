@@ -1,0 +1,12 @@
+[package]
+name        = "overdeck-mixer"
+description = "A reference two-channel DJ mixer plugin (CLAP / VST3) for testing decks: trim, 3-band isolator EQ, channel faders, crossfader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683", default-features = false, features = ["vst3"] }

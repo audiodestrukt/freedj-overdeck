@@ -1,0 +1,47 @@
+# Two decks through the reference mixer.  Both play from 1 s.  The
+# crossfader starts on A; A's lows are killed at 5 s; the crossfader goes
+# over to B from 7 to 8 s.
+sample_rate = 48000
+block = 256
+
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+track  = "TRACK_A"
+
+[[deck]]
+plugin = "~/.clap/OpenDeck.clap"
+track  = "TRACK_B"
+
+[mixer]
+plugin = "MIXER"
+inputs = [0, 1]
+
+[[automate]]
+at = 0.0
+target = "mixer"
+param = "Crossfader"
+value = 0.0
+
+[[step]]
+at = 1.0
+deck = 0
+play = true
+
+[[step]]
+at = 1.0
+deck = 1
+play = true
+
+[[automate]]
+at = 5.0
+target = "mixer"
+param = "A Low"
+value = -26.0
+
+[[automate]]
+at = 7.0
+to = 8.0
+target = "mixer"
+param = "Crossfader"
+from = 0.0
+value = 1.0
