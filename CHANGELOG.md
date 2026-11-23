@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- `dock = true` puts the decks' windows side by side across the screen
+  (freedj's `OPENDECK_TILE`). On a Wayland desktop the decks go through
+  XWayland, since Wayland doesn't let a client place its windows. This is
+  a stopgap until the decks draw into Overdeck's own window.
 - A reference DJ mixer plugin (`crates/mixer`, CLAP and VST3) for testing
   decks. It has Trim, a three-band isolator EQ with full kills, channel
   Faders, a constant-power Crossfader and Master, and unit-tested DSP.

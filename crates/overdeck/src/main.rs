@@ -72,6 +72,14 @@ struct Host {
 }
 
 fn host(cfg: &Config) -> Result<Host> {
+    if cfg.dock {
+        // Before any deck starts its window system connection.
+        std::env::set_var("OPENDECK_TILE", cfg.decks.len().to_string());
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("DISPLAY").is_some() {
+            log::info!("overdeck: dock: the decks use XWayland, so their windows can be placed");
+            std::env::remove_var("WAYLAND_DISPLAY");
+        }
+    }
     let decks = decks(cfg)?;
     let mixer = match &cfg.mixer {
         Some(m) => {

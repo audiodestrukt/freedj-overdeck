@@ -93,6 +93,11 @@ where they belong:
 freedj already renders offscreen for screenshots (`OPENDECK_SCREENSHOT`), so
 the renderer half exists. It needs a "render to this buffer" entry point.
 
+**Until then, `dock = true`.** freedj's `OPENDECK_TILE=N` makes each deck
+open its window in its Nth of the screen width, side by side. Overdeck sets
+it, and on Wayland moves the decks to XWayland so they can place their
+windows. These are still separate windows, but it's enough to watch a mix.
+
 ## 4. Small boards: units, a lighter plugin
 
 CLAP is a light C ABI. What's heavy about freedj-as-CLAP is freedj itself

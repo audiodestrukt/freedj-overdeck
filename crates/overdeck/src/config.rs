@@ -33,6 +33,12 @@ pub struct Config {
     pub sample_rate: u32,
     #[serde(default = "default_block")]
     pub block: u32,
+    /// Put the decks' windows side by side (freedj's OPENDECK_TILE).  On a
+    /// Wayland desktop the decks go through XWayland for it, since Wayland
+    /// doesn't let a client place its windows.  A stopgap until the decks
+    /// draw into Overdeck's own window (docs/ARCHITECTURE.md §3).
+    #[serde(default)]
+    pub dock: bool,
     #[serde(rename = "deck", default)]
     pub decks: Vec<DeckCfg>,
     #[serde(rename = "step", default)]
