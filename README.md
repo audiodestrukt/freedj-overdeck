@@ -6,7 +6,7 @@ the hardware (jogs, keys, panels, screens), and talks to the decks in one
 small protocol, ODP. The aim is a Raspberry Pi 5 that is a two- or four-deck
 product depending on its config, and the same decks in a DAW.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design:
+See [docs/ALL-IN-ONE.md](docs/ALL-IN-ONE.md) for packaging it as an all-in-one product (Anima, our own Pi box), and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design:
 - why the host owns every bus;
 - ODP and its transports;
 - screens;
