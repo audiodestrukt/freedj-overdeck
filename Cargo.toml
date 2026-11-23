@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members  = ["crates/odp", "crates/clap-host", "crates/surface", "crates/overdeck", "crates/mixer", "crates/panel"]
+members  = ["crates/display", "crates/odp", "crates/clap-host", "crates/surface", "crates/overdeck", "crates/mixer", "crates/panel"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +9,7 @@ license = "GPL-2.0-or-later"
 
 [workspace.dependencies]
 odp        = { path = "crates/odp" }
+display    = { path = "crates/display", package = "overdeck-display" }
 clap-host  = { path = "crates/clap-host" }
 surface    = { path = "crates/surface" }
 clap-sys   = "0.6"

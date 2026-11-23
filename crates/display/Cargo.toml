@@ -1,0 +1,9 @@
+[package]
+name        = "overdeck-display"
+description = "Overdeck's display contract: a deck draws its screen into a shared-memory frame the host allocates, and takes the screen's touches back"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+memmap2 = "0.9"
