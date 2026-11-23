@@ -188,7 +188,58 @@ parameter can be scripted with `[[automate]]` (set or ramped, in the
 parameter's own units). Later the same router takes ODP for the mixer's
 controls from hardware: faders and EQ knobs are surface drivers too.
 
-## 7. What runs today
+## 7. Real decks beside plugin decks
+
+Overdeck has to work in every rig: plugin decks alone, real players (an
+XDJ, a CDJ) alone, or both side by side in one mixer and one screen.
+
+**Decision: every slot is a freedj plugin; what changes is what feeds it.**
+A slot is either
+
+| | plugin deck | mirror deck |
+|---|---|---|
+| plays | its own tracks | nothing: it follows Link player N |
+| screen | its own state | the real player's state, with that track's waveform and grid fetched from it |
+| audio out | its own playback | the slot's audio input passed through (the real player's S/PDIF or line out), or silence when the player is cabled to a hardware mixer |
+| controls | ODP from jogs and keys | none (the real player has its own) |
+
+```toml
+[[deck]]                      # a freedj deck
+plugin = "OpenDeck.clap"
+
+[[deck]]                      # mirrors the XDJ on Link player 2
+plugin = "OpenDeck.clap"
+follow = 2
+input  = [2, 3]               # its audio: the interface's inputs 3 and 4
+```
+
+Why the plugin and not a mirror built into Overdeck: the skins, the
+waveform renderer and the Link database client are freedj's. A built-in
+mirror would be a second deck renderer to keep matching the real screen,
+and a freedj mirror also runs outside Overdeck (on its own, on an iPad).
+Overdeck never learns what an XDJ is: it routes audio and screens.
+
+**Link carries no audio**, only state and library data, so a real player's
+sound reaches Overdeck on a cable: line out into an interface, or its
+digital out (coax S/PDIF on the XDJ-1000 and CDJ-3000) into an S/PDIF
+input. A digital input runs on the player's own crystal, so an input that
+is not on the output device's clock needs asynchronous rate conversion
+(ASRC) to the output clock; one interface doing both in and out has one
+clock and needs none.
+
+**How exact a mirror is.** An XDJ-1000 tells Link its beat number, its
+pitch and when each beat lands; only a CDJ-3000 sends its playhead in
+milliseconds. So a mirror of an XDJ is right at every beat and runs on at
+the pitch between them: a cue, a scratch or a nudge inside one beat shows
+at the next. While paused it knows the beat, not where in it.
+
+**Link belongs to the host, later.** Today each freedj deck runs its own
+Link stack (two decks in one process collide on the dbserver port, §8). As
+with every other bus (§1), the end state is one Link node per box: a
+player number per slot, one media server, one status feed that plugin and
+mirror decks both read. A mirror only listens, so it doesn't wait for this.
+
+## 8. What runs today
 
 - `overdeck render`/`run` loads freedj-3000's CLAP, runs N decks, each
   with its own track (written into the plugin's state) and its own output
@@ -216,7 +267,7 @@ controls from hardware: faders and EQ knobs are surface drivers too.
 - **Not on a Pi yet.** Nothing has been run on a Pi 5. Overdeck is pure
   Rust plus cpal (ALSA), but freedj's CLAP has to be built for aarch64.
 
-## 8. Order of work
+## 9. Order of work
 
 1. **Pi 5 bring-up:** build OpenDeck.clap for aarch64 and run two decks
    from `overdeck run` on the Pi's audio, under labwc.
@@ -228,3 +279,7 @@ controls from hardware: faders and EQ knobs are surface drivers too.
 5. **Units:** the trait, a WSOLA deck unit, the CLAP wrapper.
 6. **USB gadget:** UAC2 + ODP vendor interface on a Pi/RP2350; the link
    plugin.
+7. **Real decks (§7):** freedj's follow mode (a deck that mirrors Link
+   player N, tested against recorded XDJ traffic); then audio inputs in the
+   engine and the plugin's pass-through; then ASRC for an input on another
+   clock; then host-owned Link.
