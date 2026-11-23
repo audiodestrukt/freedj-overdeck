@@ -177,8 +177,8 @@ controls from hardware: faders and EQ knobs are surface drivers too.
   channels, driven by scripted ODP inputs.
 - Two decks through the reference mixer, with a scripted crossfade and
   bass swap, in `demos/two-deck-mix.toml`. It played live on the desktop's
-  sound card with one ALSA underrun in 42 s at 256-frame blocks (still to
-  look into). A second end-to-end test checks that the crossfader selects
+  sound card with one ALSA underrun in 42 s at 256-frame blocks, and clean
+  at 512 (the demo's setting; latency is the price, ~11 ms a block). A second end-to-end test checks that the crossfader selects
   each deck and that A's low kill removes the bass.
 - An end-to-end test (`OVERDECK_E2E=1 cargo test`) runs two real decks: deck
   0 silent until its PLAY at 3 s, deck 1 silent until its PLAY at 8 s,

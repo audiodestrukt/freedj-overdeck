@@ -3,7 +3,7 @@
 # Tracks: set TRACK_A / TRACK_B paths below (the tracks aren't beatmatched:
 # this shows the mixer, not a mix).
 sample_rate = 48000
-block = 256
+block = 512                    # 256 underran once in 42 s on the desktop; 512 played clean
 
 [[deck]]
 plugin = "~/.clap/OpenDeck.clap"
