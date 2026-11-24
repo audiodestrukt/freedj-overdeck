@@ -73,9 +73,57 @@ deck's waveform and analysis come from the original); an NFS file per
 version (`Contents/…/x.instrumental.wav`) or one file re-rendered per
 load; how the DJ picks the version (Overdeck's screen, before LOAD).
 
-### 2.3 Stock decks, live: the shadow deck
+### 2.3 Live stems, the plan: the CDJ as a controller
 
-Live stems on any deck, using FOLLOW:
+Decided 2026-11-24 (Dan: "does it make more sense to just control freedj
+in Overdeck with HID mode?"). For live stems, freedj plays and the CDJ
+controls it: the CDJ in its control mode (MIDI or HID, over USB, or over
+LAN on a CDJ-3000) is an Overdeck surface, and a freedj deck makes the
+sound. There is nothing to lock: the jog and keys drive the deck that plays,
+so stems, effects and the sampler are native, not bolted on under a
+mirrored playhead.
+
+| | Follow (2.4) | Control mode |
+|---|---|---|
+| Who plays | the CDJ; Overdeck chases it | freedj; the CDJ is a controller |
+| Sync | a mirror on beat/position packets, weakest on jog, scratch, loops | none needed |
+| Stems, effects, sampler | under a mirrored playhead | native |
+| Tracks from | the DJ's stick, over LINK | Overdeck's library (or the stick read over LINK, to add) |
+| Setup | none: on Link, it works | each CDJ switched to control mode and cabled to Overdeck |
+| The CDJ's screen | its own | what its control mode shows, often little |
+
+So the two serve different booths:
+
+- **Your rig** (your decks, Overdeck on a Pi or a laptop): control mode.
+  Live stems, effects and the sampler, with the CDJ as jog and keys.
+- **A booth you don't control:** follow. No setup, the DJ's stick as
+  usual; Overdeck knows every deck (visuals, recording, phrase sync) and can
+  offer the fixed versions of 2.2.
+
+What exists to build on:
+- freedj-3000 `crates/link`: the CDJ-over-LAN HID transport (lanhid), its
+  handshake secret kept out of the repo (gitignored config).
+- From cdj3k-emu: MIDI is live without the handshake; the full HID control
+  report (0x20) is locked behind it.
+- freedj-3000 `crates/app/src/surface/`: controllers.toml maps USB MIDI to
+  deck actions (DJ2Go is a preset).
+- Overdeck's surface layer (ARCHITECTURE.md §1-2): hardware to ODP.
+
+So the first driver is a mapping more than a new stack: a "CDJ as
+controller" surface in Overdeck, from the CDJ's reports to ODP for one
+freedj deck, and lamps back.
+
+First step: on Dan's XDJ-1000MK2, see what its control mode sends over
+USB (MIDI, HID, or both) and whether any of it needs the handshake. That
+decides whether the first driver is MIDI or HID. Then: jog (touch and
+turn), PLAY, CUE, hot cues, tempo, in the shape freedj's controller
+mapping already has.
+
+### 2.4 Stock decks, live, the fallback: the shadow deck
+
+When the decks can't be switched to control mode (a booth you don't
+control) and live stems are still wanted. Live stems on any deck, using
+FOLLOW:
 
 1. A slot follows the real player (`follow = N`): it loads the same track
    over LINK and holds the player's playhead.
@@ -108,7 +156,7 @@ The first step to prove it: one CDJ-3000 in cdj3k-emu, a follow slot, and
 the slot's stems played under the player's playhead, graded the way FOLLOW
 was graded (per beat, and at pause).
 
-### 2.4 Streaming services: not this way
+### 2.5 Streaming services: not this way
 
 Dan asked about real-time stems from Spotify. As of this writing:
 
